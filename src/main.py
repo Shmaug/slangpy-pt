@@ -1,11 +1,12 @@
 import os
 import slangpy as spy
-# from Gui.Gui import Gui
 from Scene.Scene import *
+from Scene.GltfLoader import *
 from Scene.Camera import CameraController
 from Passes.Accumulate.Accumulate import Accumulator
 from Passes.PathTracer.PathTracer import PathTracer
 from Passes.ToneMapper.ToneMapper import ToneMapper
+from concurrent.futures import ThreadPoolExecutor
 
 def demo_scene():
     stage = SceneBuilder()
@@ -13,7 +14,7 @@ def demo_scene():
     stage.camera.position = spy.float3(2, 1, 2)
 
     floor_material  = stage.add_material(Material(base_color=spy.float3(0.5)))
-    floor_mesh      = stage.add_mesh(Mesh.create_quad([5, 5]))
+    floor_mesh      = stage.add_mesh(Mesh.create_quad(spy.float2(5, 5)))
     floor_transform = stage.add_transform(Transform())
     stage.add_instance(floor_mesh, floor_material, floor_transform)
 
@@ -24,7 +25,7 @@ def demo_scene():
                 Material(base_color=spy.float3(np.random.rand(3).astype(np.float32)))  # type: ignore (TYPINGTODO: need explicit np->float conversion)
             )
         )
-    cube_mesh = stage.add_mesh(Mesh.create_cube([0.1, 0.1, 0.1]))
+    cube_mesh = stage.add_mesh(Mesh.create_cube(spy.float3(0.1, 0.1, 0.1)))
 
     for i in range(1000):
         transform = Transform()
@@ -41,10 +42,10 @@ def demo_scene():
 class App:
     def __init__(self):
         super().__init__()
-        self.window = spy.Window(width=1920, height=1080, title="PathTracer", resizable=True)
+        self.window = spy.Window(width=1920, height=1080, title="App", resizable=True)
         self.device = spy.Device(
             enable_debug_layers=False,
-            compiler_options={"include_paths": [os.path.abspath("")]},
+            compiler_options={"include_paths": [os.path.abspath(""), os.path.abspath("src")]},
         )
         self.surface = self.device.create_surface(self.window)
         self.surface.configure({
@@ -58,7 +59,7 @@ class App:
         self.window.on_mouse_event    = self.on_mouse_event
         self.window.on_resize         = self.on_resize
 
-        # self.gui = Gui(self.device, self.window.width, self.window.height)
+        self.ui = spy.ui.Context(self.device)
 
         self.scene = Scene(self.device, demo_scene())
 
@@ -71,62 +72,88 @@ class App:
         ]
 
         self.render_texture: spy.Texture = None  # type: ignore (will be set immediately)
+        self.fps_avg = 0
+        self.setup_ui()
 
-        # self.gui.refresh_font_texture()
+        self.executor = ThreadPoolExecutor(max_workers=2)
+
+    def load_scene(self, file):
+        if file is None:
+            return
+        if not os.path.exists(file):
+            print(f"Error: {file} does not exist")
+            return
+        self.scene = Scene(self.device, load_gltf(self.device, file))
+        for p in self.passes:
+            if callable(getattr(p,'on_load_scene')):
+                p.on_load_scene(self.scene)
+    
+    def setup_ui(self):
+        screen = self.ui.screen
+        window = spy.ui.Window(screen, "Settings", size=spy.float2(500, 300))
+        self.fps_text = spy.ui.Text(window, "FPS: 0")
+
+        def load_scene_clicked():
+            f = self.executor.submit(spy.platform.open_file_dialog)
+            def on_done(r):
+                self.load_scene(r.result())
+            f.add_done_callback(on_done)
+        spy.ui.Button(window, "Load Scene", callback=load_scene_clicked)
 
     def on_shader_reload(self, e:spy.ShaderHotReloadEvent):
         self.history_valid = False
 
     def on_keyboard_event(self, event: spy.KeyboardEvent):
+        if self.ui.handle_keyboard_event(event):
+            return        
         if event.type == spy.KeyboardEventType.key_press:
             if event.key == spy.KeyCode.escape:
                 self.window.close()
-            elif event.key == spy.KeyCode.f1:
-                if self.output_texture:
-                    spy.tev.show_async(self.output_texture)
-            elif event.key == spy.KeyCode.f2:
-                if self.output_texture:
-                    bitmap = self.output_texture.to_bitmap()
-                    bitmap.convert(
-                        spy.Bitmap.PixelFormat.rgb,
-                        spy.Bitmap.ComponentType.uint8,
-                        srgb_gamma=True,
-                    ).write_async("screenshot.png")
+            # elif event.key == spy.KeyCode.f1:
+            #     if self.output_texture:
+            #         spy.tev.show_async(self.output_texture)
+            # elif event.key == spy.KeyCode.f2:
+            #     if self.output_texture:
+            #         bitmap = self.output_texture.to_bitmap()
+            #         bitmap.convert(
+            #             spy.Bitmap.PixelFormat.rgb,
+            #             spy.Bitmap.ComponentType.uint8,
+            #             srgb_gamma=True,
+            #         ).write_async("screenshot.png")
 
         self.camera_controller.on_keyboard_event(event)
 
     def on_mouse_event(self, event: spy.MouseEvent):
+        if self.ui.handle_mouse_event(event):
+            return
         self.camera_controller.on_mouse_event(event)
 
     def on_resize(self, width: int, height: int):
         self.device.wait()
-        self.surface.configure({"width": width, "height": height, "vsync": False})
-        # self.gui.on_resize(width, height)
-
-    def render(self, command_encoder):
-        args = {
-            "history_valid": self.history_valid
-        }
-        for p in self.passes:
-            p.execute(command_encoder, self.render_texture, args)
-        self.history_valid = True
+        if width > 0 and height > 0:
+            self.surface.configure(width=width, height=height)
+        else:
+            self.surface.unconfigure()
 
     def main_loop(self):
         timer = spy.Timer()
         while not self.window.should_close():
-            dt = timer.elapsed_s()
-            timer.reset()
-
             self.window.process_events()
-
-            if self.camera_controller.update(dt):
-                self.history_valid = False
 
             surface_texture = self.surface.acquire_next_image()
             if not surface_texture:
                 continue
 
-            # self.gui.new_frame()
+            dt = timer.elapsed_s()
+            timer.reset()
+
+            self.ui.begin_frame(surface_texture.width, surface_texture.height)
+
+            self.fps_avg = 0.95 * self.fps_avg + 0.05 * (1.0 / dt)
+            self.fps_text.text = f"FPS: {self.fps_avg:.2f}"
+
+            if self.camera_controller.update(dt):
+                self.history_valid = False
 
             if (
                 self.render_texture == None
@@ -144,13 +171,17 @@ class App:
 
             command_encoder = self.device.create_command_encoder()
 
-            self.render(command_encoder)
-
-            # self.gui.render(command_encoder, self.render_texture)
-            
-            # self.gui.end_frame(command_encoder, self.render_texture)
+            arg_dict = {
+                "history_valid": self.history_valid
+            }
+            for p in self.passes:
+                p.execute(command_encoder, self.render_texture, arg_dict)
+            self.history_valid = True
 
             command_encoder.blit(surface_texture, self.render_texture)
+
+            self.ui.end_frame(surface_texture, command_encoder)            
+
             self.device.submit_command_buffer(command_encoder.finish())
             del surface_texture
 

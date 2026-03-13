@@ -1,5 +1,7 @@
 import MathUtils;
 
+static const uint SCENE_TEXTURE_ARRAY_SIZE = 1024;
+
 struct Camera {
     float3 position;
     float3 image_u;
@@ -16,12 +18,16 @@ struct Camera {
 
 struct MaterialDesc {
     float3 base_color;
+    uint   base_color_texture_id;
 };
 
-struct Vertex {
+struct MeshVertex {
     float3 position;
+    float  u;
     float3 normal;
-    float2 uv;
+    float  v;
+
+    property float2 uv { get { return float2(u, v); } }
 };
 
 struct MeshDesc {
@@ -35,6 +41,7 @@ struct InstanceDesc {
     uint mesh_id;
     uint material_id;
     uint transform_id;
+    uint padding;
 };
 
 struct HitInfo {
@@ -45,16 +52,25 @@ struct HitInfo {
     uint primitive_index;
 };
 
+struct SceneVertex {
+    float3 position;
+    float3 normal;
+    float2 uv;
+}
+
 struct Scene {
     RaytracingAccelerationStructure tlas;
 
-    StructuredBuffer<MaterialDesc, Std430DataLayout> material_descs;
-    StructuredBuffer<MeshDesc, Std430DataLayout>     mesh_descs;
-    StructuredBuffer<InstanceDesc, Std430DataLayout> instance_descs;
-    StructuredBuffer<Vertex, Std430DataLayout>   vertices;
-    StructuredBuffer<uint>     indices;
-    StructuredBuffer<float4x4> transforms;
-    StructuredBuffer<float4x4> inverse_transpose_transforms;
+    StructuredBuffer<MaterialDesc> material_descs;
+    StructuredBuffer<MeshDesc>     mesh_descs;
+    StructuredBuffer<InstanceDesc> instance_descs;
+    StructuredBuffer<MeshVertex>   vertices;
+    StructuredBuffer<uint>         indices;
+    StructuredBuffer<float4x4>     transforms;
+    StructuredBuffer<float4x4>     inverse_transpose_transforms;
+
+    SamplerState sampler;
+    Texture2D<float4> textures[SCENE_TEXTURE_ARRAY_SIZE];
 
     Camera camera;
 
@@ -64,12 +80,12 @@ struct Scene {
         return material_descs[instance_desc.material_id];
     }
 
-    Vertex get_vertex(HitInfo hit_info)
+    SceneVertex get_vertex(HitInfo hit_info)
     {
         return get_vertex(hit_info.instance_id, hit_info.primitive_index, hit_info.bary);
     }
 
-    Vertex get_vertex(uint instance_id, uint primitive_index, float2 bary)
+    SceneVertex get_vertex(uint instance_id, uint primitive_index, float2 bary)
     {
         InstanceDesc instance_desc = instance_descs[instance_id];
         MeshDesc mesh_desc = mesh_descs[instance_desc.mesh_id];
@@ -78,9 +94,9 @@ struct Scene {
         uint i0 = indices[mesh_desc.index_offset + primitive_index * 3 + 0];
         uint i1 = indices[mesh_desc.index_offset + primitive_index * 3 + 1];
         uint i2 = indices[mesh_desc.index_offset + primitive_index * 3 + 2];
-        Vertex v0 = vertices[mesh_desc.vertex_offset + i0];
-        Vertex v1 = vertices[mesh_desc.vertex_offset + i1];
-        Vertex v2 = vertices[mesh_desc.vertex_offset + i2];
+        MeshVertex v0 = vertices[mesh_desc.vertex_offset + i0];
+        MeshVertex v1 = vertices[mesh_desc.vertex_offset + i1];
+        MeshVertex v2 = vertices[mesh_desc.vertex_offset + i2];
         float3 b = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
         return {
             mul(transform, float4(b.x * v0.position + b.y * v1.position + b.z * v2.position, 1.0)).xyz,

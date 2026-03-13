@@ -2,7 +2,6 @@ import slangpy as spy
 
 class Camera:
     def __init__(self):
-        super().__init__()
         self.width = 100
         self.height = 100
         self.aspect_ratio = 1.0
@@ -25,7 +24,7 @@ class Camera:
         self.image_v = self.up * spy.math.tan(fov * 0.5)
         self.image_w = self.fwd
 
-    def parameters(self):
+    def shader_parameters(self):
         return {
             "position": self.position,
             "image_u": self.image_u,
@@ -45,7 +44,6 @@ class CameraController:
     MOVE_SHIFT_FACTOR = 10.0
 
     def __init__(self, camera: Camera):
-        super().__init__()
         self.camera = camera
         self.mouse_down = False
         self.mouse_pos = spy.float2()

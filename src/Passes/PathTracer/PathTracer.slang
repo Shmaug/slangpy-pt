@@ -1,5 +1,6 @@
 import MathUtils;
 import Scene.Scene;
+import RNG;
 
 struct Frame {
     float3 n;
@@ -14,48 +15,6 @@ struct Frame {
 
     float3 to_local(float3 w) { return float3(dot(t, w), dot(b, w), dot(n, w)); }
     float3 to_global(float3 w) { return w.x * t + w.y * b + w.z * n; }
-};
-
-struct RNG {
-    uint state;
-
-    __init(uint seed) { state = seed; }
-
-    __init(uint2 pixel, uint sample_index)
-    {
-        state = (pixel.x * 100591) ^ (pixel.y * 102191) ^ (sample_index * 103643);
-    }
-
-    [mutating]
-    uint next()
-    {
-        const uint A = 1664525u;
-        const uint C = 1013904223u;
-        state = (A * state + C);
-        return state;
-    }
-
-    [mutating]
-    float next_1d() { return (next() >> 8) * 0x1p-24; }
-
-    [mutating]
-    float2 next_2d()
-    {
-        float2 result;
-        result.x = next_1d();
-        result.y = next_1d();
-        return result;
-    }
-
-    [mutating]
-    float3 next_3d()
-    {
-        float3 result;
-        result.x = next_1d();
-        result.y = next_1d();
-        result.z = next_1d();
-        return result;
-    }
 };
 
 struct Path {
@@ -104,7 +63,7 @@ void trace_path(inout Path path)
             path.L += path.thp * envmap(path.ray.Direction);
             break;
         }
-        Vertex vertex = scene.get_vertex(hit);
+        SceneVertex vertex = scene.get_vertex(hit);
         // Flip normal if we hit the backside of the triangle
         vertex.normal *= sign(-dot(vertex.normal, path.ray.Direction));
         Frame frame = Frame(vertex.normal);

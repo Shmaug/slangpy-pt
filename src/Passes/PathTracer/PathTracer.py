@@ -11,6 +11,10 @@ class PathTracer:
         self.frame = 0
         self.device.register_shader_hot_reload_callback(self.on_shader_reload)
 
+    def on_load_scene(self, scene):
+        self.frame = 0
+        self.scene = scene
+
     def on_shader_reload(self, e:spy.ShaderHotReloadEvent):
         self.frame = 0
 
@@ -29,7 +33,7 @@ class PathTracer:
         self.kernel.dispatch(
             thread_count=[renderTarget.width, renderTarget.height, 1],
             vars={
-                "scene": self.scene.parameters(),
+                "scene": self.scene.shader_parameters(),
                 "renderTarget": renderTarget,
                 "randomSeed": self.frame,
                 "spp": 4

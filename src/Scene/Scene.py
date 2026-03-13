@@ -5,23 +5,35 @@ from dataclasses import dataclass
 import struct
 from Scene.Camera import Camera
 
+SCENE_TEXTURE_ARRAY_SIZE = 1024
+
 class Material:
-    def __init__(self, base_color: "spy.float3param" = spy.float3(0.5)):
-        super().__init__()
+    def __init__(self, base_color: spy.float3 = spy.float3(0.5), base_color_texture:spy.Texture = None):
         self.base_color = base_color
+        self.base_color_texture = base_color_texture
+
+@dataclass
+class MeshVertex:
+    position : spy.float3
+    normal : spy.float3
+    uv : spy.float2
+
+    def pack(self):
+        return struct.pack("ffffffff", self.position[0], self.position[1], self.position[2], self.uv[0], self.normal[0], self.normal[1], self.normal[2], self.uv[1])
 
 
 class Mesh:
     def __init__(
         self,
-        vertices: npt.NDArray[np.float32],  # type: ignore
+        vertices: npt.NDArray[MeshVertex],  # type: ignore
         indices: npt.NDArray[np.uint32],  # type: ignore
     ):
         super().__init__()
-        assert vertices.ndim == 2 and vertices.dtype == np.float32
+        assert vertices.ndim == 1 and vertices.dtype == MeshVertex
         assert indices.ndim == 2 and indices.dtype == np.uint32
         self.vertices = vertices
         self.indices = indices
+        self.blas = None
 
     @property
     def vertex_count(self):
@@ -36,18 +48,18 @@ class Mesh:
         return self.triangle_count * 3
 
     @classmethod
-    def create_quad(cls, size: "spy.float2param" = spy.float2(1)):
+    def create_quad(cls, size: spy.float2 = spy.float2(1)):
+        s = spy.float3(0.5 * size.x, 0, 0.5 * size.y)
         vertices = np.array(
             [
                 # position, normal, uv
-                [-0.5, 0, -0.5, 0, 1, 0, 0, 0],
-                [+0.5, 0, -0.5, 0, 1, 0, 1, 0],
-                [-0.5, 0, +0.5, 0, 1, 0, 0, 1],
-                [+0.5, 0, +0.5, 0, 1, 0, 1, 1],
+                MeshVertex(spy.float3(-s.x, 0, -s.y), spy.float3(0, 1, 0), spy.float2(0, 0)),
+                MeshVertex(spy.float3(+s.x, 0, -s.y), spy.float3(0, 1, 0), spy.float2(1, 0)),
+                MeshVertex(spy.float3(-s.x, 0, +s.y), spy.float3(0, 1, 0), spy.float2(0, 1)),
+                MeshVertex(spy.float3(+s.x, 0, +s.y), spy.float3(0, 1, 0), spy.float2(1, 1)),
             ],
-            dtype=np.float32,
+            dtype=MeshVertex,
         )
-        vertices[:, (0, 2)] *= [size[0], size[1]]
         indices = np.array(
             [
                 [2, 1, 0],
@@ -58,44 +70,44 @@ class Mesh:
         return Mesh(vertices, indices)
 
     @classmethod
-    def create_cube(cls, size: "spy.float3param" = spy.float3(1)):
+    def create_cube(cls, size: spy.float3 = spy.float3(1)):
+        s = 0.5 * size
         vertices = np.array(
             [
                 # position, normal, uv
                 # left
-                [-0.5, -0.5, -0.5, 0, -1, 0, 0.0, 0.0],
-                [-0.5, -0.5, +0.5, 0, -1, 0, 1.0, 0.0],
-                [+0.5, -0.5, +0.5, 0, -1, 0, 1.0, 1.0],
-                [+0.5, -0.5, -0.5, 0, -1, 0, 0.0, 1.0],
+                MeshVertex(spy.float3(-s.x, -s.y, -s.z), spy.float3(0, -1, 0), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, -s.y, +s.z), spy.float3(0, -1, 0), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, +s.z), spy.float3(0, -1, 0), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, -s.z), spy.float3(0, -1, 0), spy.float2(0.0, 1.0)),
                 # right
-                [-0.5, +0.5, +0.5, 0, +1, 0, 0.0, 0.0],
-                [-0.5, +0.5, -0.5, 0, +1, 0, 1.0, 0.0],
-                [+0.5, +0.5, -0.5, 0, +1, 0, 1.0, 1.0],
-                [+0.5, +0.5, +0.5, 0, +1, 0, 0.0, 1.0],
+                MeshVertex(spy.float3(-s.x, +s.y, +s.z), spy.float3(0, +1, 0), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, +s.y, -s.z), spy.float3(0, +1, 0), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, +s.y, -s.z), spy.float3(0, +1, 0), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(+s.x, +s.y, +s.z), spy.float3(0, +1, 0), spy.float2(0.0, 1.0)),
                 # back
-                [-0.5, +0.5, -0.5, 0, 0, -1, 0.0, 0.0],
-                [-0.5, -0.5, -0.5, 0, 0, -1, 1.0, 0.0],
-                [+0.5, -0.5, -0.5, 0, 0, -1, 1.0, 1.0],
-                [+0.5, +0.5, -0.5, 0, 0, -1, 0.0, 1.0],
+                MeshVertex(spy.float3(-s.x, +s.y, -s.z), spy.float3(0, 0, -1), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, -s.y, -s.z), spy.float3(0, 0, -1), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, -s.z), spy.float3(0, 0, -1), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(+s.x, +s.y, -s.z), spy.float3(0, 0, -1), spy.float2(0.0, 1.0)),
                 # front
-                [+0.5, +0.5, +0.5, 0, 0, +1, 0.0, 0.0],
-                [+0.5, -0.5, +0.5, 0, 0, +1, 1.0, 0.0],
-                [-0.5, -0.5, +0.5, 0, 0, +1, 1.0, 1.0],
-                [-0.5, +0.5, +0.5, 0, 0, +1, 0.0, 1.0],
+                MeshVertex(spy.float3(+s.x, +s.y, +s.z), spy.float3(0, 0, +1), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, +s.z), spy.float3(0, 0, +1), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, -s.y, +s.z), spy.float3(0, 0, +1), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(-s.x, +s.y, +s.z), spy.float3(0, 0, +1), spy.float2(0.0, 1.0)),
                 # bottom
-                [-0.5, +0.5, +0.5, -1, 0, 0, 0.0, 0.0],
-                [-0.5, -0.5, +0.5, -1, 0, 0, 1.0, 0.0],
-                [-0.5, -0.5, -0.5, -1, 0, 0, 1.0, 1.0],
-                [-0.5, +0.5, -0.5, -1, 0, 0, 0.0, 1.0],
+                MeshVertex(spy.float3(-s.x, +s.y, +s.z), spy.float3(-1, 0, 0), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, -s.y, +s.z), spy.float3(-1, 0, 0), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(-s.x, -s.y, -s.z), spy.float3(-1, 0, 0), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(-s.x, +s.y, -s.z), spy.float3(-1, 0, 0), spy.float2(0.0, 1.0)),
                 # top
-                [+0.5, +0.5, -0.5, +1, 0, 0, 0.0, 0.0],
-                [+0.5, -0.5, -0.5, +1, 0, 0, 1.0, 0.0],
-                [+0.5, -0.5, +0.5, +1, 0, 0, 1.0, 1.0],
-                [+0.5, +0.5, +0.5, +1, 0, 0, 0.0, 1.0],
+                MeshVertex(spy.float3(+s.x, +s.y, -s.z), spy.float3(+1, 0, 0), spy.float2(0.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, -s.z), spy.float3(+1, 0, 0), spy.float2(1.0, 0.0)),
+                MeshVertex(spy.float3(+s.x, -s.y, +s.z), spy.float3(+1, 0, 0), spy.float2(1.0, 1.0)),
+                MeshVertex(spy.float3(+s.x, +s.y, +s.z), spy.float3(+1, 0, 0), spy.float2(0.0, 1.0)),
             ],
-            dtype=np.float32,
+            dtype=MeshVertex,
         )
-        vertices[:, 0:3] *= [size[0], size[1], size[2]]
 
         indices = np.array(
             [
@@ -117,14 +129,12 @@ class Mesh:
 
         return Mesh(vertices, indices)
 
-
 class Transform:
     def __init__(self):
-        super().__init__()
         self.translation = spy.float3(0)
-        self.scaling = spy.float3(1)
-        self.rotation = spy.float3(0)
-        self.matrix = spy.float4x4.identity()
+        self.scaling     = spy.float3(1)
+        self.rotation    = spy.float3(0)
+        self.matrix      = spy.float4x4.identity()
 
     def update_matrix(self):
         T = spy.math.matrix_from_translation(self.translation)
@@ -132,10 +142,8 @@ class Transform:
         R = spy.math.matrix_from_rotation_xyz(self.rotation)
         self.matrix = spy.math.mul(spy.math.mul(T, R), S)
 
-
 class SceneBuilder:
     def __init__(self):
-        super().__init__()
         self.camera = Camera()
         self.materials = []
         self.meshes = []
@@ -162,14 +170,14 @@ class SceneBuilder:
         self.instances.append((mesh_id, material_id, transform_id))
         return instance_id
 
-
 class Scene:
     @dataclass
     class MaterialDesc:
         base_color: spy.float3
+        base_color_texture_id: int
 
         def pack(self):
-            return struct.pack("fff", self.base_color[0], self.base_color[1], self.base_color[2])
+            return struct.pack("fffI", self.base_color[0], self.base_color[1], self.base_color[2], self.base_color_texture_id)
 
     @dataclass
     class MeshDesc:
@@ -194,7 +202,7 @@ class Scene:
         transform_id: int
 
         def pack(self):
-            return struct.pack("III", self.mesh_id, self.material_id, self.transform_id)
+            return struct.pack("IIII", self.mesh_id, self.material_id, self.transform_id, 0)
 
     def __init__(self, device: spy.Device, stage: SceneBuilder):
         super().__init__()
@@ -202,23 +210,56 @@ class Scene:
 
         self.camera = stage.camera
 
-        # Prepare material descriptors
-        self.material_descs = [Scene.MaterialDesc(base_color=m.base_color) for m in stage.materials]
-        material_descs_data = np.frombuffer(
-            b"".join(d.pack() for d in self.material_descs), dtype=np.uint8
-        ).flatten()
+        # Prepare material descriptors and textures
+        self.textures = []
+        tex_id_map = {}
+        def get_image_id(img):
+            if img is None:
+                return 0xffffffff
+            elif img in tex_id_map:
+                return tex_id_map[img]
+            else:
+                id = len(self.textures)
+                self.textures.append(img)
+                tex_id_map[img] = id
+                return id
+        
+        material_descs = [
+            Scene.MaterialDesc(
+                base_color=m.base_color,
+                base_color_texture_id=get_image_id(m.base_color_texture)
+            )
+            for m in stage.materials
+        ]
         self.material_descs_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="material_descs_buffer",
-            data=material_descs_data,
+            data=np.frombuffer( b"".join(d.pack() for d in material_descs), dtype=np.uint8 ).flatten()
         )
 
+        if len(self.textures) < SCENE_TEXTURE_ARRAY_SIZE:
+            default_texture = self.device.create_texture(
+                format = spy.Format.rgba32_float,
+                width  = 1,
+                height = 1,
+                usage  = spy.TextureUsage.shader_resource,
+                data   = np.array([ [ [ 1,0,1,1 ] ] ], dtype=np.float32)
+            )
+            self.textures += [ default_texture ] * (SCENE_TEXTURE_ARRAY_SIZE - len(self.textures))
+
+        self.sampler = self.device.create_sampler(
+            min_filter=spy.TextureFilteringMode.linear,
+            mag_filter=spy.TextureFilteringMode.linear,
+            address_u=spy.TextureAddressingMode.wrap,
+            address_v=spy.TextureAddressingMode.wrap,
+        )
+        
         # Prepare mesh descriptors
         vertex_count = 0
         index_count = 0
-        self.mesh_descs = []
+        mesh_descs = []
         for mesh in stage.meshes:
-            self.mesh_descs.append(
+            mesh_descs.append(
                 Scene.MeshDesc(
                     vertex_count=mesh.vertex_count,
                     index_count=mesh.index_count,
@@ -227,7 +268,7 @@ class Scene:
                 )
             )
             vertex_count += mesh.vertex_count
-            index_count += mesh.index_count
+            index_count  += mesh.index_count
 
         # Prepare instance descriptors
         self.instance_descs = []
@@ -236,45 +277,34 @@ class Scene:
 
         # Create vertex and index buffers
         vertices = np.concatenate([mesh.vertices for mesh in stage.meshes], axis=0)
-        indices = np.concatenate([mesh.indices for mesh in stage.meshes], axis=0)
+        indices  = np.concatenate([mesh.indices for mesh in stage.meshes], axis=0)
         assert vertices.shape[0] == vertex_count
         assert indices.shape[0] == index_count // 3
 
         self.vertex_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="vertex_buffer",
-            data=vertices,
+            data=np.frombuffer( b"".join(d.pack() for d in vertices), dtype=np.uint8 ).flatten()
         )
-
         self.index_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="index_buffer",
-            data=indices,
+            data=indices
         )
-
-        mesh_descs_data = np.frombuffer(
-            b"".join(d.pack() for d in self.mesh_descs), dtype=np.uint8
-        ).flatten()
         self.mesh_descs_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="mesh_descs_buffer",
-            data=mesh_descs_data,
+            data=np.frombuffer( b"".join(d.pack() for d in mesh_descs), dtype=np.uint8 ).flatten(),
         )
-
-        instance_descs_data = np.frombuffer(
-            b"".join(d.pack() for d in self.instance_descs), dtype=np.uint8
-        ).flatten()
         self.instance_descs_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="instance_descs_buffer",
-            data=instance_descs_data,
+            data=np.frombuffer( b"".join(d.pack() for d in self.instance_descs), dtype=np.uint8 ).flatten(),
         )
 
         # Prepare transforms
-        self.transforms = [t.matrix for t in stage.transforms]
-        self.inverse_transpose_transforms = [
-            spy.math.transpose(spy.math.inverse(t)) for t in self.transforms
-        ]
+        self.transforms = [ t.matrix for t in stage.transforms ]
+        self.inverse_transpose_transforms = [ spy.math.transpose(spy.math.inverse(t)) for t in self.transforms ]
         self.transform_buffer = device.create_buffer(
             usage=spy.BufferUsage.shader_resource,
             label="transform_buffer",
@@ -286,10 +316,7 @@ class Scene:
             data=np.stack([t.to_numpy() for t in self.inverse_transpose_transforms]),
         )
 
-        # Build BLASes
-        self.blases = [self.build_blas(mesh_desc) for mesh_desc in self.mesh_descs]
-
-        # Build TLAS
+        self.blases = [self.build_blas(mesh_desc) for mesh_desc in mesh_descs]
         self.tlas = self.build_tlas()
 
     def build_blas(self, mesh_desc: MeshDesc):
@@ -381,7 +408,7 @@ class Scene:
 
         return tlas
     
-    def parameters(self):
+    def shader_parameters(self):
         return {
             "tlas": self.tlas,
             "material_descs": self.material_descs_buffer,
@@ -391,5 +418,7 @@ class Scene:
             "indices": self.index_buffer,
             "transforms": self.transform_buffer,
             "inverse_transpose_transforms": self.inverse_transpose_transforms_buffer,
-            "camera": self.camera.parameters()
+            "camera": self.camera.shader_parameters(),
+            "sampler": self.sampler,
+            "textures": self.textures
         }
